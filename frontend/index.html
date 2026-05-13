@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeAlpha Projects</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter',sans-serif; background:#f0f2f5; color:#1a1a2e; }
+.navbar { background:#fff; padding:14px 30px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 10px rgba(0,0,0,0.06); position:sticky; top:0; z-index:100; }
+.navbar h2 { font-size:20px; font-weight:800; }
+.navbar h2 span { color:#6c63ff; }
+.nav-links { display:flex; gap:16px; align-items:center; }
+.nav-links a { text-decoration:none; color:#555; font-weight:500; font-size:13px; cursor:pointer; }
+.nav-links a:hover { color:#6c63ff; }
+.btn { padding:8px 18px; border:none; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; transition:0.2s; }
+.btn-primary { background:#6c63ff; color:#fff; }
+.btn-primary:hover { background:#5a52e0; }
+.btn-outline { background:transparent; border:2px solid #6c63ff; color:#6c63ff; }
+.btn-outline:hover { background:#6c63ff; color:#fff; }
+.btn-sm { padding:5px 12px; font-size:12px; }
+.btn-danger { background:#ff4757; color:#fff; }
+.btn-danger:hover { background:#e0404e; }
+.hidden { display:none !important; }
+.container { max-width:1200px; margin:0 auto; padding:20px; }
+.modal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; }
+.modal-content { background:#fff; padding:28px; border-radius:16px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto; }
+.modal-content h3 { margin-bottom:16px; }
+.form-group { margin-bottom:14px; }
+.form-group label { display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#555; }
+.form-group input, .form-group textarea, .form-group select { width:100%; padding:10px 14px; border:2px solid #e0e0e0; border-radius:8px; font-size:14px; outline:none; font-family:inherit; }
+.form-group input:focus, .form-group textarea:focus { border-color:#6c63ff; }
+.toast { position:fixed; bottom:30px; right:30px; background:#1a1a2e; color:#fff; padding:14px 24px; border-radius:10px; font-size:14px; opacity:0; transition:0.3s; z-index:300; }
+.toast.show { opacity:1; }
+.empty-state { text-align:center; padding:60px 20px; color:#999; }
+.project-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; margin-top:16px; }
+.project-card { background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.06); cursor:pointer; transition:0.2s; }
+.project-card:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(0,0,0,0.1); }
+.project-card h3 { font-size:16px; margin-bottom:6px; }
+.project-card p { font-size:13px; color:#777; }
+.board { display:flex; gap:16px; overflow-x:auto; padding:16px 0; min-height:60vh; }
+.column { min-width:280px; width:280px; background:#e8ecf1; border-radius:12px; padding:14px; flex-shrink:0; }
+.column h4 { font-size:14px; font-weight:700; margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px; color:#555; }
+.task-card { background:#fff; border-radius:10px; padding:14px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,0.06); cursor:pointer; transition:0.2s; }
+.task-card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+.task-card h5 { font-size:14px; }
+.task-card .meta { display:flex; justify-content:space-between; font-size:11px; color:#888; margin-top:6px; }
+.priority-high { border-left:3px solid #ff4757; }
+.priority-medium { border-left:3px solid #ffa502; }
+.priority-low { border-left:3px solid #2ed573; }
+.comment { padding:10px 0; border-bottom:1px solid #eee; font-size:13px; }
+.comment .meta { font-size:11px; color:#888; margin-top:2px; }
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <h2>Code<span>Alpha</span> Projects</h2>
+  <div class="nav-links">
+    <a onclick="showPage('dashboard')">Dashboard</a>
+    <a id="authLink" onclick="showAuth()">Login</a>
+    <a id="userName" class="hidden" style="color:#6c63ff;font-weight:600;"></a>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- Dashboard -->
+<div id="page-dashboard">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <h2 style="font-size:22px;">My Projects</h2>
+    <button class="btn btn-primary" onclick="showCreateProject()">+ New Project</button>
+  </div>
+  <div class="project-grid" id="projectGrid"></div>
+</div>
+
+<!-- Board -->
+<div id="page-board" class="hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <div>
+      <a href="#" onclick="showPage('dashboard')" style="font-size:13px;color:#6c63ff;">← Back</a>
+      <h2 id="boardTitle" style="font-size:22px;margin-top:4px;"></h2>
+    </div>
+    <button class="btn btn-primary" onclick="showCreateTask()">+ Add Task</button>
+  </div>
+  <div class="board" id="board"></div>
+</div>
+
+</div>
+
+<!-- Auth Modal -->
+<div class="modal hidden" id="authModal">
+  <div class="modal-content">
+    <h3 id="authTitle">Login</h3>
+    <div class="form-group hidden" id="nameGroup"><label>Name</label><input id="regName" placeholder="Your name"></div>
+    <div class="form-group"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com"></div>
+    <div class="form-group"><label>Password</label><input id="authPassword" type="password" placeholder="******"></div>
+    <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="handleAuth()" id="authSubmit">Login</button>
+    <p style="text-align:center;font-size:13px;color:#777;">
+      <span id="authToggleText">Don't have an account?</span>
+      <a href="#" onclick="toggleAuth()" id="authToggleLink">Register</a>
+    </p>
+    <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="closeAuth()">Close</button>
+  </div>
+</div>
+
+<!-- Create Project -->
+<div class="modal hidden" id="projectModal">
+  <div class="modal-content">
+    <h3>New Project</h3>
+    <div class="form-group"><label>Project Name</label><input id="projName" placeholder="e.g. Marketing Site"></div>
+    <div class="form-group"><label>Description</label><textarea id="projDesc" rows="2" placeholder="What's this project about?"></textarea></div>
+    <button class="btn btn-primary" style="width:100%;" onclick="createProject()">Create Project</button>
+    <button class="btn btn-outline btn-sm" style="margin-top:6px;width:100%;" onclick="closeProjectModal()">Cancel</button>
+  </div>
+</div>
+
+<!-- Create Task -->
+<div class="modal hidden" id="taskModal">
+  <div class="modal-content">
+    <h3>New Task</h3>
+    <div class="form-group"><label>Title</label><input id="taskTitle" placeholder="Task title"></div>
+    <div class="form-group"><label>Description</label><textarea id="taskDesc" rows="2"></textarea></div>
+    <div class="form-group"><label>Priority</label><select id="taskPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+    <button class="btn btn-primary" style="width:100%;" onclick="createTask()">Add Task</button>
+    <button class="btn btn-outline btn-sm" style="margin-top:6px;width:100%;" onclick="closeTaskModal()">Cancel</button>
+  </div>
+</div>
+
+<!-- Task Detail Modal -->
+<div class="modal hidden" id="detailModal">
+  <div class="modal-content" style="max-width:550px;">
+    <h3 id="dtTitle"></h3>
+    <p id="dtDesc" style="color:#777;font-size:14px;margin:8px 0;"></p>
+    <div style="display:flex;gap:8px;margin:12px 0;">
+      <select id="dtStatus" onchange="updateTaskStatus()" style="padding:6px 12px;border:2px solid #e0e0e0;border-radius:6px;font-size:13px;">
+        <option value="todo">To Do</option>
+        <option value="in_progress">In Progress</option>
+        <option value="done">Done</option>
+      </select>
+      <span id="dtPriority" style="font-size:12px;padding:6px 12px;border-radius:6px;background:#eee;"></span>
+    </div>
+    <hr style="margin:12px 0;">
+    <h4 style="font-size:14px;margin-bottom:8px;">Comments</h4>
+    <div id="dtComments"></div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input id="commentInput" placeholder="Add a comment..." style="flex:1;padding:8px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;outline:none;">
+      <button class="btn btn-primary btn-sm" onclick="addComment()">Send</button>
+    </div>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px;width:100%;" onclick="closeDetailModal()">Close</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = window.location.origin.includes('hf.space') ? '' : 'http://localhost:7860';
+let token = localStorage.getItem('token') || '';
+let currentProjectId = null;
+let currentTaskId = null;
+
+function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`${API}${path}`, { ...opts, headers }).then(r => r.json());
+}
+
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+function showPage(page) { ['dashboard','board'].forEach(p => document.getElementById(`page-${p}`).classList.add('hidden')); document.getElementById(`page-${page}`).classList.remove('hidden'); if (page === 'dashboard') loadProjects(); }
+
+async function loadProjects() {
+  if (!token) { document.getElementById('projectGrid').innerHTML = '<div class="empty-state"><h3>Login to see your projects</h3></div>'; return; }
+  const projects = await api('/api/projects');
+  const grid = document.getElementById('projectGrid');
+  if (!projects.length) { grid.innerHTML = '<div class="empty-state"><h3>No projects yet</h3><p>Create your first project!</p></div>'; return; }
+  grid.innerHTML = projects.map(p => `<div class="project-card" onclick="openProject(${p.id},'${p.name}')">
+    <h3>${p.name}</h3>
+    <p>${p.description || 'No description'}</p>
+    <div style="font-size:11px;color:#aaa;margin-top:8px;">Created ${p.created_at || ''}</div>
+  </div>`).join('');
+}
+
+function openProject(id, name) {
+  currentProjectId = id;
+  document.getElementById('boardTitle').textContent = name;
+  showPage('board');
+  loadBoard();
+}
+
+async function loadBoard() {
+  if (!currentProjectId) return;
+  const tasks = await api(`/api/projects/${currentProjectId}/tasks`);
+  const columns = [
+    { id: 'todo', title: 'To Do' },
+    { id: 'in_progress', title: 'In Progress' },
+    { id: 'done', title: 'Done' },
+  ];
+  const board = document.getElementById('board');
+  board.innerHTML = columns.map(col => `
+    <div class="column">
+      <h4>${col.title}</h4>
+      <div id="col-${col.id}">
+        ${tasks.filter(t => t.status === col.id).map(t => `
+          <div class="task-card priority-${t.priority}" onclick="openTask(${t.id})">
+            <h5>${t.title}</h5>
+            <div class="meta">
+              <span>${t.priority}</span>
+              <span>Assignee: ${t.assignee_id || 'Unassigned'}</span>
+            </div>
+          </div>
+        `).join('') || '<div style="color:#999;font-size:13px;padding:8px 0;">No tasks</div>'}
+      </div>
+    </div>
+  `).join('');
+}
+
+// Auth
+function showAuth() { document.getElementById('authModal').classList.remove('hidden'); }
+function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
+let isLogin = true;
+function toggleAuth() {
+  isLogin = !isLogin;
+  document.getElementById('authTitle').textContent = isLogin ? 'Login' : 'Register';
+  document.getElementById('authSubmit').textContent = isLogin ? 'Login' : 'Register';
+  document.getElementById('nameGroup').classList.toggle('hidden', isLogin);
+  document.getElementById('authToggleText').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+  document.getElementById('authToggleLink').textContent = isLogin ? 'Register' : 'Login';
+}
+
+async function handleAuth() {
+  const email = document.getElementById('authEmail').value;
+  const password = document.getElementById('authPassword').value;
+  if (isLogin) {
+    const res = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    if (res.token) { token = res.token; localStorage.setItem('token', token); document.getElementById('authLink').textContent = 'Logout'; document.getElementById('userName').textContent = res.user.name; document.getElementById('userName').classList.remove('hidden'); document.getElementById('authLink').onclick = logout; closeAuth(); toast('Welcome!'); loadProjects(); }
+    else toast(res.detail || 'Login failed');
+  } else {
+    const name = document.getElementById('regName').value;
+    if (!name) { toast('Enter your name'); return; }
+    const res = await api('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+    if (res.token) { token = res.token; localStorage.setItem('token', token); document.getElementById('authLink').textContent = 'Logout'; document.getElementById('userName').textContent = res.user.name; document.getElementById('userName').classList.remove('hidden'); document.getElementById('authLink').onclick = logout; closeAuth(); toast('Registered!'); loadProjects(); }
+    else toast(res.detail || 'Registration failed');
+  }
+}
+
+function logout() { token = ''; localStorage.removeItem('token'); document.getElementById('authLink').textContent = 'Login'; document.getElementById('authLink').onclick = showAuth; document.getElementById('userName').classList.add('hidden'); toast('Logged out'); }
+
+// Project CRUD
+function showCreateProject() { document.getElementById('projectModal').classList.remove('hidden'); }
+function closeProjectModal() { document.getElementById('projectModal').classList.add('hidden'); }
+async function createProject() {
+  const name = document.getElementById('projName').value;
+  const desc = document.getElementById('projDesc').value;
+  if (!name) { toast('Enter project name'); return; }
+  const res = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, description: desc }) });
+  if (res.id) { toast('Project created!'); closeProjectModal(); loadProjects(); document.getElementById('projName').value = ''; document.getElementById('projDesc').value = ''; }
+  else toast(res.detail || 'Failed');
+}
+
+// Task CRUD
+function showCreateTask() { document.getElementById('taskModal').classList.remove('hidden'); }
+function closeTaskModal() { document.getElementById('taskModal').classList.add('hidden'); }
+async function createTask() {
+  const title = document.getElementById('taskTitle').value;
+  const desc = document.getElementById('taskDesc').value;
+  const priority = document.getElementById('taskPriority').value;
+  if (!title) { toast('Enter task title'); return; }
+  const res = await api(`/api/projects/${currentProjectId}/tasks`, { method: 'POST', body: JSON.stringify({ title, description: desc, priority }) });
+  if (res.id) { toast('Task added!'); closeTaskModal(); loadBoard(); document.getElementById('taskTitle').value = ''; document.getElementById('taskDesc').value = ''; }
+  else toast(res.detail || 'Failed');
+}
+
+async function openTask(tid) {
+  currentTaskId = tid;
+  const tasks = await api(`/api/projects/${currentProjectId}/tasks`);
+  const t = tasks.find(t => t.id === tid);
+  if (!t) return;
+  document.getElementById('dtTitle').textContent = t.title;
+  document.getElementById('dtDesc').textContent = t.description || 'No description';
+  document.getElementById('dtStatus').value = t.status;
+  document.getElementById('dtPriority').textContent = t.priority;
+  document.getElementById('detailModal').classList.remove('hidden');
+  loadComments();
+}
+
+function closeDetailModal() { document.getElementById('detailModal').classList.add('hidden'); }
+
+async function updateTaskStatus() {
+  const status = document.getElementById('dtStatus').value;
+  await api(`/api/tasks/${currentTaskId}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+  toast('Status updated');
+  loadBoard();
+}
+
+async function loadComments() {
+  const comments = await api(`/api/tasks/${currentTaskId}/comments`);
+  const div = document.getElementById('dtComments');
+  if (!comments.length) { div.innerHTML = '<p style="font-size:13px;color:#999;">No comments yet.</p>'; return; }
+  div.innerHTML = comments.map(c => `<div class="comment"><strong>${c.user_name}</strong> ${c.content}<div class="meta">${c.created_at}</div></div>`).join('');
+}
+
+async function addComment() {
+  const input = document.getElementById('commentInput');
+  const content = input.value.trim();
+  if (!content) return;
+  await api(`/api/tasks/${currentTaskId}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+  input.value = '';
+  loadComments();
+  toast('Comment added');
+}
+
+// Init
+async function init() {
+  const stored = localStorage.getItem('token');
+  if (stored) {
+    token = stored;
+    const user = await api('/api/me');
+    if (user.id) { document.getElementById('authLink').textContent = 'Logout'; document.getElementById('authLink').onclick = logout; document.getElementById('userName').textContent = user.name; document.getElementById('userName').classList.remove('hidden'); }
+    else { token = ''; localStorage.removeItem('token'); }
+  }
+  loadProjects();
+}
+init();
+</script>
+</body>
+</html>
