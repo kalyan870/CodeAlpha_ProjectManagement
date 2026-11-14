@@ -21,9 +21,13 @@ flowchart LR
 
 ## Run and deployment status
 
-Python dependencies are listed in `backend/requirements.txt`; the included Dockerfile declares port `7860`. Before deploying, review its build context and `/data` database path: the current Docker `COPY` statements expect a specific context, and SQLite persistence requires a mounted writable volume.
+Python dependencies are listed in `backend/requirements.txt`; build the Docker image from the repository root with `docker build -f backend/Dockerfile -t codealpha-project-management .`. The container exposes port `7860`; mount persistent writable storage at `/data` or set `APP_DATA_DIR`.
 
-This is a learning prototype. Review authentication, password storage, token persistence, CORS, and database configuration before exposing it to real users. Do not use it as a production team workspace without that work.
+The current backend uses salted PBKDF2 password hashes, bearer headers, project membership checks, input bounds, and configurable CORS (`CORS_ORIGINS`). Set `APP_DATA_DIR` to a persistent writable directory. Legacy SHA-256 password hashes are upgraded after a successful login.
+
+This remains a learning prototype, not a production team workspace: bearer tokens are held in process memory and are lost on restart, and SQLite is not configured for multi-instance production use. Review deployment secrets, rate limiting, durable sessions, database migrations, and operational backup/restore before exposing it to real users.
+
+Run backend security tests from the repository root with `python -m pip install -r backend/requirements-dev.txt` and `python -m pytest -q backend/tests`.
 
 ## Project media
 

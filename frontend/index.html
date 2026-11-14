@@ -167,6 +167,7 @@ function api(path, opts = {}) {
 }
 
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 function showPage(page) { ['dashboard','board'].forEach(p => document.getElementById(`page-${p}`).classList.add('hidden')); document.getElementById(`page-${page}`).classList.remove('hidden'); if (page === 'dashboard') loadProjects(); }
 
 async function loadProjects() {
@@ -174,16 +175,17 @@ async function loadProjects() {
   const projects = await api('/api/projects');
   const grid = document.getElementById('projectGrid');
   if (!projects.length) { grid.innerHTML = '<div class="empty-state"><h3>No projects yet</h3><p>Create your first project!</p></div>'; return; }
-  grid.innerHTML = projects.map(p => `<div class="project-card" onclick="openProject(${p.id},'${p.name}')">
-    <h3>${p.name}</h3>
-    <p>${p.description || 'No description'}</p>
+  grid.innerHTML = projects.map(p => `<div class="project-card" onclick="openProject(${Number(p.id)})">
+    <h3>${escapeHtml(p.name)}</h3>
+    <p>${escapeHtml(p.description || 'No description')}</p>
     <div style="font-size:11px;color:#aaa;margin-top:8px;">Created ${p.created_at || ''}</div>
   </div>`).join('');
 }
 
-function openProject(id, name) {
+async function openProject(id) {
   currentProjectId = id;
-  document.getElementById('boardTitle').textContent = name;
+  const project = await api(`/api/projects/${id}`);
+  document.getElementById('boardTitle').textContent = project.name || 'Project';
   showPage('board');
   loadBoard();
 }
@@ -203,7 +205,7 @@ async function loadBoard() {
       <div id="col-${col.id}">
         ${tasks.filter(t => t.status === col.id).map(t => `
           <div class="task-card priority-${t.priority}" onclick="openTask(${t.id})">
-            <h5>${t.title}</h5>
+            <h5>${escapeHtml(t.title)}</h5>
             <div class="meta">
               <span>${t.priority}</span>
               <span>Assignee: ${t.assignee_id || 'Unassigned'}</span>
@@ -297,7 +299,7 @@ async function loadComments() {
   const comments = await api(`/api/tasks/${currentTaskId}/comments`);
   const div = document.getElementById('dtComments');
   if (!comments.length) { div.innerHTML = '<p style="font-size:13px;color:#999;">No comments yet.</p>'; return; }
-  div.innerHTML = comments.map(c => `<div class="comment"><strong>${c.user_name}</strong> ${c.content}<div class="meta">${c.created_at}</div></div>`).join('');
+  div.innerHTML = comments.map(c => `<div class="comment"><strong>${escapeHtml(c.user_name)}</strong> ${escapeHtml(c.content)}<div class="meta">${escapeHtml(c.created_at)}</div></div>`).join('');
 }
 
 async function addComment() {
