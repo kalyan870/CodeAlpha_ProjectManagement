@@ -92,15 +92,10 @@ body { font-family:'Inter',sans-serif; background:#f0f2f5; color:#1a1a2e; }
 <!-- Auth Modal -->
 <div class="modal hidden" id="authModal">
   <div class="modal-content">
-    <h3 id="authTitle">Login</h3>
-    <div class="form-group hidden" id="nameGroup"><label>Name</label><input id="regName" placeholder="Your name"></div>
-    <div class="form-group"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com"></div>
-    <div class="form-group"><label>Password</label><input id="authPassword" type="password" placeholder="******"></div>
-    <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="handleAuth()" id="authSubmit">Login</button>
-    <p style="text-align:center;font-size:13px;color:#777;">
-      <span id="authToggleText">Don't have an account?</span>
-      <a href="#" onclick="toggleAuth()" id="authToggleLink">Register</a>
-    </p>
+    <h3 id="authTitle">Sign in</h3>
+    <div id="clerkAuthMount" style="min-height:220px;margin:12px 0;"></div>
+    <p style="text-align:center;font-size:13px;color:#777;"><span id="authToggleText">New to the workspace?</span>
+      <a href="#" onclick="toggleAuth(event)" id="authToggleLink">Create account</a></p>
     <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="closeAuth()">Close</button>
   </div>
 </div>
@@ -155,15 +150,22 @@ body { font-family:'Inter',sans-serif; background:#f0f2f5; color:#1a1a2e; }
 <div class="toast" id="toast"></div>
 
 <script>
-const API = window.location.origin.includes('hf.space') ? '' : 'http://localhost:7860';
-let token = localStorage.getItem('token') || '';
+const API = '';
+let clerk = null;
+let authMode = 'sign-in';
 let currentProjectId = null;
 let currentTaskId = null;
 
-function api(path, opts = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  const token = clerk?.session ? await clerk.session.getToken() : null;
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  return fetch(`${API}${path}`, { ...opts, headers }).then(r => r.json());
+  if (clerk?.user) {
+    headers['X-User-Name'] = clerk.user.fullName || 'Team member';
+    headers['X-User-Email'] = clerk.user.primaryEmailAddress?.emailAddress || '';
+  }
+  const response = await fetch(`${API}${path}`, { ...opts, headers });
+  return response.json();
 }
 
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
@@ -171,7 +173,7 @@ function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, ch =
 function showPage(page) { ['dashboard','board'].forEach(p => document.getElementById(`page-${p}`).classList.add('hidden')); document.getElementById(`page-${page}`).classList.remove('hidden'); if (page === 'dashboard') loadProjects(); }
 
 async function loadProjects() {
-  if (!token) { document.getElementById('projectGrid').innerHTML = '<div class="empty-state"><h3>Login to see your projects</h3></div>'; return; }
+  if (!clerk?.user) { document.getElementById('projectGrid').innerHTML = '<div class="empty-state"><h3>Sign in to see your projects</h3></div>'; return; }
   const projects = await api('/api/projects');
   const grid = document.getElementById('projectGrid');
   if (!projects.length) { grid.innerHTML = '<div class="empty-state"><h3>No projects yet</h3><p>Create your first project!</p></div>'; return; }
@@ -217,36 +219,66 @@ async function loadBoard() {
   `).join('');
 }
 
-// Auth
-function showAuth() { document.getElementById('authModal').classList.remove('hidden'); }
-function closeAuth() { document.getElementById('authModal').classList.add('hidden'); }
-let isLogin = true;
-function toggleAuth() {
-  isLogin = !isLogin;
-  document.getElementById('authTitle').textContent = isLogin ? 'Login' : 'Register';
-  document.getElementById('authSubmit').textContent = isLogin ? 'Login' : 'Register';
-  document.getElementById('nameGroup').classList.toggle('hidden', isLogin);
-  document.getElementById('authToggleText').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
-  document.getElementById('authToggleLink').textContent = isLogin ? 'Register' : 'Login';
+// Clerk authentication; the API verifies every session token server-side.
+function showAuth() {
+  document.getElementById('authModal').classList.remove('hidden');
+  if (clerk) mountClerkAuth();
+  else document.getElementById('clerkAuthMount').textContent = 'Sign-in is not configured. Set the Clerk publishable key on the server.';
 }
-
-async function handleAuth() {
-  const email = document.getElementById('authEmail').value;
-  const password = document.getElementById('authPassword').value;
-  if (isLogin) {
-    const res = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
-    if (res.token) { token = res.token; localStorage.setItem('token', token); document.getElementById('authLink').textContent = 'Logout'; document.getElementById('userName').textContent = res.user.name; document.getElementById('userName').classList.remove('hidden'); document.getElementById('authLink').onclick = logout; closeAuth(); toast('Welcome!'); loadProjects(); }
-    else toast(res.detail || 'Login failed');
-  } else {
-    const name = document.getElementById('regName').value;
-    if (!name) { toast('Enter your name'); return; }
-    const res = await api('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
-    if (res.token) { token = res.token; localStorage.setItem('token', token); document.getElementById('authLink').textContent = 'Logout'; document.getElementById('userName').textContent = res.user.name; document.getElementById('userName').classList.remove('hidden'); document.getElementById('authLink').onclick = logout; closeAuth(); toast('Registered!'); loadProjects(); }
-    else toast(res.detail || 'Registration failed');
+function closeAuth() {
+  if (clerk) {
+    const root = document.getElementById('clerkAuthMount');
+    try { authMode === 'sign-in' ? clerk.unmountSignIn(root) : clerk.unmountSignUp(root); } catch {}
+    root.replaceChildren();
   }
+  document.getElementById('authModal').classList.add('hidden');
 }
-
-function logout() { token = ''; localStorage.removeItem('token'); document.getElementById('authLink').textContent = 'Login'; document.getElementById('authLink').onclick = showAuth; document.getElementById('userName').classList.add('hidden'); toast('Logged out'); }
+function toggleAuth(event) {
+  event?.preventDefault();
+  authMode = authMode === 'sign-in' ? 'sign-up' : 'sign-in';
+  document.getElementById('authTitle').textContent = authMode === 'sign-in' ? 'Sign in' : 'Create account';
+  document.getElementById('authToggleText').textContent = authMode === 'sign-in' ? 'New to the workspace?' : 'Already have an account?';
+  document.getElementById('authToggleLink').textContent = authMode === 'sign-in' ? 'Create account' : 'Sign in';
+  if (clerk) mountClerkAuth();
+}
+function mountClerkAuth() {
+  const root = document.getElementById('clerkAuthMount');
+  root.replaceChildren();
+  authMode === 'sign-in' ? clerk.mountSignIn(root) : clerk.mountSignUp(root);
+}
+async function logout() { if (clerk) await clerk.signOut(); await syncAuthUI(); toast('Signed out'); }
+function loadScript(src, attributes = {}) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script'); script.src = src; script.async = true; script.crossOrigin = 'anonymous';
+    Object.entries(attributes).forEach(([name, value]) => script.setAttribute(name, value));
+    script.onload = resolve; script.onerror = () => reject(new Error('Clerk script failed')); document.head.appendChild(script);
+  });
+}
+async function initClerk() {
+  const response = await fetch('/api/public-config');
+  const { clerk_publishable_key: key } = await response.json();
+  if (!key) return;
+  const domain = atob(key.split('_')[2]).slice(0, -1);
+  await loadScript(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`);
+  await loadScript(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, { 'data-clerk-publishable-key': key });
+  clerk = new window.Clerk(key);
+  await clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+  clerk.addListener(() => { void syncAuthUI(); });
+  await syncAuthUI();
+}
+async function syncAuthUI() {
+  const link = document.getElementById('authLink'), name = document.getElementById('userName');
+  if (!clerk?.user) {
+    link.textContent = 'Login'; link.onclick = showAuth; name.classList.add('hidden');
+    if (!document.getElementById('page-dashboard').classList.contains('hidden')) loadProjects();
+    return;
+  }
+  link.textContent = 'Logout'; link.onclick = logout;
+  name.textContent = clerk.user.fullName || clerk.user.primaryEmailAddress?.emailAddress || 'Team member'; name.classList.remove('hidden');
+  await api('/api/me');
+  if (!document.getElementById('authModal').classList.contains('hidden')) closeAuth();
+  if (!document.getElementById('page-dashboard').classList.contains('hidden')) loadProjects();
+}
 
 // Project CRUD
 function showCreateProject() { document.getElementById('projectModal').classList.remove('hidden'); }
@@ -314,13 +346,7 @@ async function addComment() {
 
 // Init
 async function init() {
-  const stored = localStorage.getItem('token');
-  if (stored) {
-    token = stored;
-    const user = await api('/api/me');
-    if (user.id) { document.getElementById('authLink').textContent = 'Logout'; document.getElementById('authLink').onclick = logout; document.getElementById('userName').textContent = user.name; document.getElementById('userName').classList.remove('hidden'); }
-    else { token = ''; localStorage.removeItem('token'); }
-  }
+  try { await initClerk(); } catch { toast('Authentication setup could not be loaded'); }
   loadProjects();
 }
 init();

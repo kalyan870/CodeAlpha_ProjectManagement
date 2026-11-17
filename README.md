@@ -1,12 +1,12 @@
 # CodeAlpha Project Management
 
-<p align="center"><strong>A project and task-management prototype with a FastAPI backend, relational records, and a browser interface.</strong></p>
+<p align="center"><strong>A project and task-management prototype with a FastAPI backend, team membership, tasks, and comments.</strong></p>
 
-<p align="center">Python · FastAPI · SQLite · HTML/CSS/JavaScript</p>
+<p align="center">Python · FastAPI · Clerk · Neon Postgres · HTML/CSS/JavaScript</p>
 
 ## Project overview
 
-The backend in `backend/app/main.py` defines registration/login, project membership, tasks, and task comments, backed by SQLite tables. The repository includes a frontend entry page, screenshots, and a recorded deployment demo.
+Clerk authenticates users, while Neon stores projects, memberships, tasks, and comments. The interface supports private projects, shared team access, task status, priority, assignees, and comments. The repository includes a browser UI, screenshots, and a recorded demo.
 
 ## Architecture
 
@@ -14,20 +14,21 @@ The backend in `backend/app/main.py` defines registration/login, project members
 flowchart LR
   U[Team member] --> F[Browser interface]
   F --> A[FastAPI service]
-  A --> R[Accounts, projects, tasks, comments]
-  R --> D[(SQLite database)]
+  A --> C[Verify Clerk session on server]
+  C --> R[Project, membership, task, comment routes]
+  R --> D[(Neon Postgres)]
   D --> R --> F
 ```
 
-## Run and deployment status
+## Configure and run
 
-Python dependencies are listed in `backend/requirements.txt`; build the Docker image from the repository root with `docker build -f backend/Dockerfile -t codealpha-project-management .`. The container exposes port `7860`; mount persistent writable storage at `/data` or set `APP_DATA_DIR`.
+Install `backend/requirements.txt`, copy `backend/.env.example` into the server environment, configure Clerk and Neon, and apply `backend/migrations/0001_clerk_neon.sql` to Neon before startup. Keep `CLERK_SECRET_KEY`, optional `CLERK_JWT_KEY`, and `DATABASE_URL` server-side. The public publishable Clerk key is returned by `/api/public-config` for the browser. Set exact origins in `CORS_ORIGINS` and `CLERK_AUTHORIZED_PARTIES`.
 
-The current backend uses salted PBKDF2 password hashes, bearer headers, project membership checks, input bounds, and configurable CORS (`CORS_ORIGINS`). Set `APP_DATA_DIR` to a persistent writable directory. Legacy SHA-256 password hashes are upgraded after a successful login.
+Build the container from the repository root with `docker build -f backend/Dockerfile -t codealpha-project-management .`; it exposes port `7860`. Local tests may use SQLite; production uses Neon.
 
-This remains a learning prototype, not a production team workspace: bearer tokens are held in process memory and are lost on restart, and SQLite is not configured for multi-instance production use. Review deployment secrets, rate limiting, durable sessions, database migrations, and operational backup/restore before exposing it to real users.
+Protected API routes validate Clerk session tokens on the server and check project membership before reading or changing project data. No R2 bucket is added because this project has no file upload or generated-media workflow.
 
-Run backend security tests from the repository root with `python -m pip install -r backend/requirements-dev.txt` and `python -m pytest -q backend/tests`.
+Run backend tests with `python -m pip install -r backend/requirements-dev.txt` and `python -m pytest -q backend/tests`.
 
 ## Project media
 
@@ -36,7 +37,10 @@ Run backend security tests from the repository root with `python -m pip install 
 
 ## Project structure
 
-- `backend/app/main.py` — FastAPI routes and SQLite setup
-- `backend/requirements.txt` — Python packages
+- `backend/app/main.py` — FastAPI routes
+- `backend/app/auth.py` — Clerk session verification
+- `backend/app/database.py` — SQLAlchemy engine and local SQLite test setup
+- `backend/migrations/0001_clerk_neon.sql` — Neon schema and indexes
+- `backend/requirements.txt` — Python dependencies
 - `backend/Dockerfile` — container recipe
-- `frontend/index.html` — browser interface entry page
+- `frontend/index.html` — browser interface
