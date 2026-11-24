@@ -1,231 +1,203 @@
-import os, json, hashlib, secrets
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi.staticfiles import StaticFiles
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from sqlalchemy import text
 
-app = FastAPI(title="CodeAlpha Project Manager")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+from app.auth import require_user
+from app.database import get_engine, initialize_local_database
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    if os.getenv("DATABASE_URL", "").startswith("sqlite:"):
+        initialize_local_database()
+    yield
+
+
+app = FastAPI(title="CodeAlpha Project Manager", lifespan=lifespan)
+origins = [item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:7860,http://127.0.0.1:7860").split(",") if item.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PATCH", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-User-Name", "X-User-Email"])
 app.mount("/static", StaticFiles(directory="frontend"), name="frontend")
+
 
 @app.get("/")
 def index():
     return FileResponse("frontend/index.html")
 
-DB = "/data/pm.db"
-os.makedirs("/data", exist_ok=True)
 
-def get_db():
-    import sqlite3
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+@app.get("/api/public-config")
+def public_config():
+    return {"clerk_publishable_key": os.getenv("CLERK_PUBLISHABLE_KEY", "")}
 
-def init_db():
-    conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS projects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            owner_id INTEGER NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (owner_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS project_members (
-            project_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            PRIMARY KEY (project_id, user_id)
-        );
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            status TEXT DEFAULT 'todo',
-            priority TEXT DEFAULT 'medium',
-            assignee_id INTEGER,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        );
-        CREATE TABLE IF NOT EXISTS comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (task_id) REFERENCES tasks(id)
-        );
-    """)
-    conn.commit()
-    conn.close()
 
-init_db()
+@app.get("/api/health")
+def health():
+    return {"ok": True, "configured": {"clerk": bool(os.getenv("CLERK_SECRET_KEY")), "database": bool(os.getenv("DATABASE_URL"))}}
 
-# Models
-class UserCreate(BaseModel): name: str; email: str; password: str
-class UserLogin(BaseModel): email: str; password: str
-class ProjectCreate(BaseModel): name: str; description: Optional[str] = ""
-class TaskCreate(BaseModel): title: str; description: Optional[str] = ""; priority: Optional[str] = "medium"; assignee_id: Optional[int] = None
-class TaskUpdate(BaseModel): status: Optional[str] = None; title: Optional[str] = None; description: Optional[str] = None; priority: Optional[str] = None; assignee_id: Optional[int] = None
-class CommentCreate(BaseModel): content: str
 
-def hash_pw(pw): return hashlib.sha256(pw.encode()).hexdigest()
+def profile_values(request: Request, user_id: str):
+    # These client-provided fields are display-only. Authorization always uses
+    # the subject from Clerk's verified session token.
+    name = (request.headers.get("x-user-name") or "Team member")[:100]
+    email = (request.headers.get("x-user-email") or "")[:254]
+    return {"id": user_id, "name": name, "email": email}
 
-tokens = {}
 
-def get_user(auth: str):
-    token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
-    uid = tokens.get(token)
-    if not uid: raise HTTPException(401, "Not authenticated")
-    return uid
+def touch_profile(conn, request: Request, user_id: str):
+    values = profile_values(request, user_id)
+    conn.execute(text("""INSERT INTO users (id, name, email) VALUES (:id, :name, :email)
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email"""), values)
+    return values
 
-# Auth
-@app.post("/api/register")
-def register(u: UserCreate):
-    conn = get_db()
-    if conn.execute("SELECT id FROM users WHERE email=?", (u.email,)).fetchone():
-        conn.close(); raise HTTPException(400, "Email exists")
-    conn.execute("INSERT INTO users (name, email, password) VALUES (?,?,?)", (u.name, u.email, hash_pw(u.password)))
-    conn.commit()
-    uid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    token = secrets.token_hex(32); tokens[token] = uid
-    user = dict(conn.execute("SELECT id, name, email FROM users WHERE id=?", (uid,)).fetchone())
-    conn.close()
-    return {"token": token, "user": user}
 
-@app.post("/api/login")
-def login(u: UserLogin):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM users WHERE email=? AND password=?", (u.email, hash_pw(u.password))).fetchone()
-    conn.close()
-    if not row: raise HTTPException(401, "Invalid credentials")
-    user = dict(row)
-    token = secrets.token_hex(32); tokens[token] = user["id"]
-    return {"token": token, "user": {"id": user["id"], "name": user["name"], "email": user["email"]}}
+def member_project(conn, pid: int, uid: str):
+    row = conn.execute(text("""SELECT 1 FROM projects p LEFT JOIN project_members m ON p.id=m.project_id
+        WHERE p.id=:pid AND (p.owner_id=:uid OR m.user_id=:uid)"""), {"pid": pid, "uid": uid}).first()
+    if not row:
+        raise HTTPException(404, "Project not found")
+
+
+def member_task(conn, tid: int, uid: str):
+    row = conn.execute(text("SELECT project_id FROM tasks WHERE id=:tid"), {"tid": tid}).first()
+    if not row:
+        raise HTTPException(404, "Task not found")
+    member_project(conn, row.project_id, uid)
+    return row.project_id
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default="", max_length=2000)
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = Field(default="", max_length=4000)
+    priority: str = Field(default="medium", pattern="^(low|medium|high)$")
+    assignee_id: Optional[str] = Field(default=None, min_length=1, max_length=255)
+
+
+class TaskUpdate(BaseModel):
+    status: Optional[str] = Field(default=None, pattern="^(todo|in_progress|done)$")
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    priority: Optional[str] = Field(default=None, pattern="^(low|medium|high)$")
+    assignee_id: Optional[str] = Field(default=None, min_length=1, max_length=255)
+
+
+class CommentCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
 
 @app.get("/api/me")
-def me(authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    row = dict(conn.execute("SELECT id, name, email FROM users WHERE id=?", (uid,)).fetchone())
-    conn.close()
-    return row
+def me(request: Request, user_id: str = Depends(require_user)):
+    with get_engine().begin() as conn:
+        return touch_profile(conn, request, user_id)
+
 
 @app.get("/api/users")
-def list_users():
-    conn = get_db()
-    rows = [dict(r) for r in conn.execute("SELECT id, name, email FROM users").fetchall()]
-    conn.close()
-    return rows
+def list_users(user_id: str = Depends(require_user)):
+    with get_engine().connect() as conn:
+        rows = conn.execute(text("SELECT id, name FROM users ORDER BY name")).mappings().all()
+        return [dict(row) for row in rows]
 
-# Projects
+
 @app.get("/api/projects")
-def list_projects(authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT DISTINCT p.* FROM projects p
-        LEFT JOIN project_members pm ON p.id = pm.project_id
-        WHERE p.owner_id=? OR pm.user_id=?
-        ORDER BY p.id DESC
-    """, (uid, uid)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+def list_projects(user_id: str = Depends(require_user)):
+    with get_engine().connect() as conn:
+        rows = conn.execute(text("""SELECT DISTINCT p.* FROM projects p LEFT JOIN project_members pm ON p.id=pm.project_id
+            WHERE p.owner_id=:uid OR pm.user_id=:uid ORDER BY p.id DESC"""), {"uid": user_id}).mappings().all()
+        return [dict(row) for row in rows]
+
 
 @app.post("/api/projects")
-def create_project(p: ProjectCreate, authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    conn.execute("INSERT INTO projects (name, description, owner_id) VALUES (?,?,?)", (p.name, p.description, uid))
-    conn.commit()
-    pid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    row = dict(conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone())
-    conn.close()
-    return row
+def create_project(project: ProjectCreate, user_id: str = Depends(require_user)):
+    with get_engine().begin() as conn:
+        result = conn.execute(text("INSERT INTO projects (name, description, owner_id) VALUES (:name, :description, :owner_id) RETURNING id"), {"name": project.name, "description": project.description or "", "owner_id": user_id})
+        return dict(conn.execute(text("SELECT * FROM projects WHERE id=:id"), {"id": result.scalar_one()}).mappings().one())
+
 
 @app.get("/api/projects/{pid}")
-def get_project(pid: int, authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    row = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
-    conn.close()
-    if not row: raise HTTPException(404, "Not found")
-    return dict(row)
+def get_project(pid: int, user_id: str = Depends(require_user)):
+    with get_engine().connect() as conn:
+        row = conn.execute(text("""SELECT p.* FROM projects p LEFT JOIN project_members m ON p.id=m.project_id
+            WHERE p.id=:pid AND (p.owner_id=:uid OR m.user_id=:uid)"""), {"pid": pid, "uid": user_id}).mappings().first()
+        if not row:
+            raise HTTPException(404, "Project not found")
+        return dict(row)
+
 
 @app.post("/api/projects/{pid}/members")
-def add_member(pid: int, user_id: int, authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    conn.execute("INSERT OR IGNORE INTO project_members (project_id, user_id) VALUES (?,?)", (pid, user_id))
-    conn.commit()
-    conn.close()
+def add_member(pid: int, user_id_to_add: str, user_id: str = Depends(require_user)):
+    with get_engine().begin() as conn:
+        project = conn.execute(text("SELECT owner_id FROM projects WHERE id=:pid"), {"pid": pid}).mappings().first()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        if project["owner_id"] != user_id:
+            raise HTTPException(403, "Only the project owner can add members")
+        if not conn.execute(text("SELECT 1 FROM users WHERE id=:id"), {"id": user_id_to_add}).first():
+            raise HTTPException(404, "User not found")
+        conn.execute(text("INSERT INTO project_members (project_id, user_id) VALUES (:pid, :uid) ON CONFLICT DO NOTHING"), {"pid": pid, "uid": user_id_to_add})
     return {"ok": True}
 
-# Tasks
+
 @app.get("/api/projects/{pid}/tasks")
-def list_tasks(pid: int, authorization: str = ""):
-    get_user(authorization)
-    conn = get_db()
-    rows = [dict(r) for r in conn.execute("SELECT * FROM tasks WHERE project_id=? ORDER BY id DESC", (pid,)).fetchall()]
-    conn.close()
-    return rows
+def list_tasks(pid: int, user_id: str = Depends(require_user)):
+    with get_engine().connect() as conn:
+        member_project(conn, pid, user_id)
+        rows = conn.execute(text("SELECT * FROM tasks WHERE project_id=:pid ORDER BY id DESC"), {"pid": pid}).mappings().all()
+        return [dict(row) for row in rows]
+
 
 @app.post("/api/projects/{pid}/tasks")
-def create_task(pid: int, t: TaskCreate, authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    conn.execute("INSERT INTO tasks (project_id, title, description, priority, assignee_id) VALUES (?,?,?,?,?)",
-                 (pid, t.title, t.description, t.priority, t.assignee_id))
-    conn.commit()
-    tid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    row = dict(conn.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone())
-    conn.close()
-    return row
+def create_task(pid: int, task: TaskCreate, user_id: str = Depends(require_user)):
+    with get_engine().begin() as conn:
+        member_project(conn, pid, user_id)
+        if task.assignee_id and not conn.execute(text("""SELECT 1 FROM project_members WHERE project_id=:pid AND user_id=:uid
+            UNION SELECT 1 FROM projects WHERE id=:pid AND owner_id=:uid"""), {"pid": pid, "uid": task.assignee_id}).first():
+            raise HTTPException(400, "Assignee must belong to the project")
+        values = task.model_dump()
+        values["description"] = values["description"] or ""
+        result = conn.execute(text("""INSERT INTO tasks (project_id,title,description,priority,assignee_id)
+            VALUES (:pid,:title,:description,:priority,:assignee_id) RETURNING id"""), {"pid": pid, **values})
+        return dict(conn.execute(text("SELECT * FROM tasks WHERE id=:id"), {"id": result.scalar_one()}).mappings().one())
+
 
 @app.patch("/api/tasks/{tid}")
-def update_task(tid: int, t: TaskUpdate, authorization: str = ""):
-    get_user(authorization)
-    conn = get_db()
-    fields = {k: v for k, v in t.model_dump().items() if v is not None}
-    if fields:
-        sets = ", ".join(f"{k}=?" for k in fields)
-        vals = list(fields.values()) + [tid]
-        conn.execute(f"UPDATE tasks SET {sets} WHERE id=?", vals)
-        conn.commit()
-    row = dict(conn.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone())
-    conn.close()
-    return row
+def update_task(tid: int, task: TaskUpdate, user_id: str = Depends(require_user)):
+    fields = {key: value for key, value in task.model_dump().items() if value is not None}
+    with get_engine().begin() as conn:
+        pid = member_task(conn, tid, user_id)
+        if fields.get("assignee_id") and not conn.execute(text("""SELECT 1 FROM project_members WHERE project_id=:pid AND user_id=:uid
+            UNION SELECT 1 FROM projects WHERE id=:pid AND owner_id=:uid"""), {"pid": pid, "uid": fields["assignee_id"]}).first():
+            raise HTTPException(400, "Assignee must belong to the project")
+        if fields:
+            sets = ", ".join(f"{key}=:{key}" for key in fields)
+            conn.execute(text(f"UPDATE tasks SET {sets} WHERE id=:tid"), {**fields, "tid": tid})
+        return dict(conn.execute(text("SELECT * FROM tasks WHERE id=:tid"), {"tid": tid}).mappings().one())
 
-# Comments
+
 @app.get("/api/tasks/{tid}/comments")
-def list_comments(tid: int, authorization: str = ""):
-    get_user(authorization)
-    conn = get_db()
-    rows = [dict(r) for r in conn.execute(
-        "SELECT c.*, u.name as user_name FROM comments c JOIN users u ON c.user_id=u.id WHERE c.task_id=? ORDER BY c.id", (tid,)).fetchall()]
-    conn.close()
-    return rows
+def list_comments(tid: int, user_id: str = Depends(require_user)):
+    with get_engine().connect() as conn:
+        member_task(conn, tid, user_id)
+        rows = conn.execute(text("""SELECT c.*, u.name AS user_name FROM comments c JOIN users u ON c.user_id=u.id
+            WHERE c.task_id=:tid ORDER BY c.id"""), {"tid": tid}).mappings().all()
+        return [dict(row) for row in rows]
+
 
 @app.post("/api/tasks/{tid}/comments")
-def create_comment(tid: int, c: CommentCreate, authorization: str = ""):
-    uid = get_user(authorization)
-    conn = get_db()
-    conn.execute("INSERT INTO comments (task_id, user_id, content) VALUES (?,?,?)", (tid, uid, c.content))
-    conn.commit()
-    cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    row = dict(conn.execute(
-        "SELECT c.*, u.name as user_name FROM comments c JOIN users u ON c.user_id=u.id WHERE c.id=?", (cid,)).fetchone())
-    conn.close()
-    return row
+def create_comment(tid: int, comment: CommentCreate, request: Request, user_id: str = Depends(require_user)):
+    with get_engine().begin() as conn:
+        member_task(conn, tid, user_id)
+        touch_profile(conn, request, user_id)
+        result = conn.execute(text("INSERT INTO comments (task_id,user_id,content) VALUES (:tid,:uid,:content) RETURNING id"), {"tid": tid, "uid": user_id, "content": comment.content})
+        row = conn.execute(text("""SELECT c.*, u.name AS user_name FROM comments c JOIN users u ON c.user_id=u.id
+            WHERE c.id=:id"""), {"id": result.scalar_one()}).mappings().one()
+        return dict(row)
