@@ -1,6 +1,7 @@
 # CodeAlpha Project Management
 
 <p align="center"><strong>A project and task-management prototype with a FastAPI backend, team membership, tasks, and comments.</strong></p>
+**Live link:** [https://ca-project-mgmt.vercel.app/login](https://ca-project-mgmt.vercel.app/login)
 
 <p align="center">Python · FastAPI · Clerk · Neon Postgres · HTML/CSS/JavaScript</p>
 
@@ -9,6 +10,11 @@
 Clerk authenticates users, while Neon stores projects, memberships, tasks, and comments. The interface supports private projects, shared team access, task status, priority, assignees, and comments. The repository includes a browser UI, screenshots, and a recorded demo.
 
 ## Architecture
+
+![CodeAlpha_ProjectManagement architecture map](docs/images/codealpha-projectmanagement-architecture.png)
+
+[Architecture notes](docs/architecture.md) · [Editable SVG](docs/images/codealpha-projectmanagement-architecture.svg)
+
 
 ```mermaid
 flowchart LR
